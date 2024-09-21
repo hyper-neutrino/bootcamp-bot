@@ -19,6 +19,22 @@ const bot = await promise;
 
 console.log(`${bot.user.tag} is ready.`);
 
+const MENTEE_LIST = process.env.MENTEES!.split(" ");
+const MENTOR_LIST = process.env.MENTORS!.split(" ");
+
+const guild = await bot.guilds.fetch(process.env.GUILD!);
+
+const members = await guild.members.fetch();
+
+function syncRoles(member: GuildMember) {
+    if (MENTEE_LIST.includes(member.user.username)) member.roles.add(process.env.MENTEE_ROLE!);
+    if (MENTOR_LIST.includes(member.user.username)) member.roles.add(process.env.MENTOR_ROLE!);
+}
+
+for (const member of members.values()) syncRoles(member);
+
+bot.on(Events.GuildMemberAdd, syncRoles);
+
 const queue: VoiceBasedChannel[] = [];
 const mentors: GuildMember[] = [];
 

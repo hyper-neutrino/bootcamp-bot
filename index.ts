@@ -20,7 +20,7 @@ const bot = await promise;
 console.log(`${bot.user.tag} is ready.`);
 
 const queue: VoiceBasedChannel[] = [];
-let mentors: GuildMember[] = [];
+const mentors: GuildMember[] = [];
 
 const logs = (await bot.channels.fetch(process.env.LOGS!)) as TextChannel;
 
@@ -37,13 +37,27 @@ bot.on(Events.VoiceStateUpdate, (before, after) => {
             after.channel !== before.channel &&
             before.channel?.parent?.id === process.env.QUEUE_CATEGORY &&
             before.guild.voiceStates.cache.every((state) => state.channel?.id !== before.channel?.id)
-        )
-            before.channel.delete();
+        ) {
+            const index = queue.findIndex((channel) => channel.id === before.channel!.id);
 
-        if (after.channel === null) {
-            mentors = mentors.filter((mentor) => mentor.id !== after.member!.id);
-            return;
+            if (index !== -1) {
+                queue.splice(index, 1);
+                queue.slice(index).forEach((channel, i) => channel.send(`You are now **#${index + i + 1}** in the queue.`));
+            }
+
+            before.channel.delete();
         }
+
+        if (before.channel?.id === process.env.MENTOR_WAITING_ROOM && after.channel?.id !== process.env.MENTOR_WAITING_ROOM) {
+            const index = mentors.findIndex((mentor) => mentor.id === after.member!.id);
+
+            if (index !== -1) {
+                mentors.splice(index, 1);
+                log(`${after.member} left the mentor queue, which is now: ${mentors.join(", ")}`);
+            }
+        }
+
+        if (after.channel === null) return;
 
         if (after.channel.id === process.env.MENTEE_WAITING_ROOM) {
             const channel = await after.guild.channels.create({
@@ -51,6 +65,16 @@ bot.on(Events.VoiceStateUpdate, (before, after) => {
                 type: ChannelType.GuildVoice,
                 parent: process.env.QUEUE_CATEGORY,
                 permissionOverwrites: [
+                    {
+                        id: after.guild.roles.everyone.id,
+                        type: OverwriteType.Role,
+                        deny: PermissionFlagsBits.ViewChannel,
+                    },
+                    {
+                        id: process.env.MENTOR_ROLE!,
+                        type: OverwriteType.Role,
+                        allow: PermissionFlagsBits.ViewChannel,
+                    },
                     {
                         id: after.member.id,
                         type: OverwriteType.Member,
@@ -62,11 +86,6 @@ bot.on(Events.VoiceStateUpdate, (before, after) => {
             await after.member.voice.setChannel(channel).catch(() => {
                 channel.send({ content: `${after.member} Please join this channel!`, allowedMentions: { users: [after.member!.id] } });
                 log(`could not move ${after.member} to ${channel}`, true);
-            });
-
-            channel.send({
-                content: `${after.member} You are now in the queue. There ${queue.length === 1 ? `is 1 person` : `are ${queue.length} people`} ahead of you.`,
-                allowedMentions: { users: [after.member.id] },
             });
 
             if (mentors.length > 0) {
@@ -84,6 +103,12 @@ bot.on(Events.VoiceStateUpdate, (before, after) => {
             }
 
             queue.push(channel);
+
+            channel.send({
+                content: `${after.member} You are **#${queue.length}** in the queue. Please hold tight and a mentor will join you soon!`,
+                allowedMentions: { users: [after.member.id] },
+            });
+
             log(`${channel} is in the queue which is now: ${queue.join(", ")}`);
         } else if (after.channel.id === process.env.MENTOR_WAITING_ROOM) {
             const channel = queue.shift();
@@ -100,6 +125,8 @@ bot.on(Events.VoiceStateUpdate, (before, after) => {
                 channel.send(`${after.member} I couldn't move you here; please join this voice channel.`);
                 log(`could not move ${after.member} to ${channel}`, true);
             });
+
+            queue.forEach((channel, index) => channel.send(`You are now **#${index + 1}** in the queue.`));
         } else if (after.channel.parent?.id === process.env.QUEUE_CATEGORY && after.member.roles.cache.has(process.env.MENTOR_ROLE!)) {
             if (after.channel.name === "Interview Room (Awaiting Mentor)") {
                 await after.channel.setName("Interview Room (Taken)");
